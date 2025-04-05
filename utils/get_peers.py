@@ -92,7 +92,7 @@ def _make_announce_request(connection_id: int, info_hash: bytes, total_length: i
     ip=0	# let tracker detect
     key = random.randint(0, 2**32 - 1)	# keep it the same across one session, used for client side detection
     num_want = -1
-
+    
     announce_req = struct.pack(">QLL20s20sQQQLLLlH", connection_id, action, transaction_id, info_hash, peer_id, downloaded, left, uploaded, event, ip, key, num_want, port)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

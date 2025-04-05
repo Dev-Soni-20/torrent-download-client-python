@@ -14,11 +14,10 @@ def connect_to_peers():
         peers = peers_list.get()
         print(peers)
 
-
 if __name__=="__main__":
 
     if len(sys.argv) != 2:
-        print("Usage: python script.py <torrent_file>")
+        print("Usage: python master.py <path_to_torrent_file>")
         sys.exit(1)
 
     file_name=sys.argv[1]

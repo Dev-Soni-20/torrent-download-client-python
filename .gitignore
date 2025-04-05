@@ -1,4 +1,4 @@
 my-env/
 references.txt
 playarea.py
-utils/__pycache__/
+__pycache__/
