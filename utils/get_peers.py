@@ -6,10 +6,11 @@ from urllib.parse import urlparse
 from typing import List, Tuple
 import bencodepy
 import hashlib
+import queue
 
-PORT_NUMBER = 6331
-MAX_TRY = 2
-MAX_TIME_TO_WAIT = 2
+PORT_NUMBER = 6882
+MAX_TRY = 1
+MAX_TIME_TO_WAIT = 1
 
 class InvalidConnectionRespone(Exception):
     pass
@@ -76,7 +77,7 @@ def _make_connection_request(tracker_ip: str, tracker_port: int, count:int)->int
     print(connection_id_resp)
     return connection_id_resp
 
-def _make_announce_request(connection_id: int, info_hash: bytes, tracker_ip: str, tracker_port: int, count: int)->List[Tuple[str, int]]:
+def _make_announce_request(connection_id: int, info_hash: bytes, total_length: int, tracker_ip: str, tracker_port: int, count: int)->List[Tuple[str, int]]:
     transaction_id = random.randint(0, 2**32 - 1)
     peer_id = b'-TR4003-' + bytes(random.getrandbits(8) for _ in range(12))
     port = PORT_NUMBER
@@ -84,7 +85,7 @@ def _make_announce_request(connection_id: int, info_hash: bytes, tracker_ip: str
 
     # Belows are generally 0 for announce request
     downloaded=0
-    left=0
+    left=total_length
     uploaded=0
 
     event = 2	# 0: none, 1: completed, 2: started, 3: stopped
@@ -101,7 +102,7 @@ def _make_announce_request(connection_id: int, info_hash: bytes, tracker_ip: str
     print(f"Announce Request Length: {len(announce_req)}")
 
     try:
-        print(f"Sending an announce request to {tracker_ip,tracker_port}")
+        print(f"Sending an announce request to {tracker_ip}:{tracker_port}")
         sock.sendto(announce_req, (tracker_ip, tracker_port))
     except socket.timeout:
         if count==MAX_TRY:
@@ -133,13 +134,7 @@ def _make_announce_request(connection_id: int, info_hash: bytes, tracker_ip: str
 
     print("The announce respone has been received")
 
-    print(f"Announce Response Length: {len(announce_resp)}")
-
-    # action_resp, transaction_id_resp = struct.unpack(">LL", announce_resp)
-    # # if action == 3:
-    # print(action, transaction_id)
-    # print(action_resp,transaction_id_resp)
-
+    print(f"Announce Response Length: {len(announce_resp)}\n")
 
     if len(announce_resp)<20:
         raise InvalidAnnounceRespone("Invalid announce respone from tracker: Packet of less than 20 bytes is received!\n")
@@ -168,20 +163,47 @@ def _make_announce_request(connection_id: int, info_hash: bytes, tracker_ip: str
     return peers
     
 
-def get_peers_list(torrent_info)->List[Tuple[str, int]]:
+def get_peers_list(torrent_info: dict, peer_list: queue.Queue):
+    tracker_url_list = []
+
+    # Extracting all the trackers from the torrent file
     try:
-        tracker_url = torrent_info[b'announce'].decode('utf-8')
-        announce_list = torrent_info[b'announce-list']
+        tracker_url_list.append(torrent_info[b'announce'].decode('utf-8'))
 
-        tracker_url_list = []
-        for url in announce_list:
-            tracker_url_list.append(url[0].decode('utf-8'))
+        if b'announce-list' in torrent_info:
+            announce_list = torrent_info[b'announce-list']
+            if announce_list[0][0].decode('utf-8') not in tracker_url_list:
+                tracker_url_list.append(announce_list[0][0].decode('utf-8'))
 
+            for url in announce_list[1:]:
+                tracker_url_list.append(url[0].decode('utf-8'))
+
+    except Exception as E:
+        print(f"Error : {E}")
+        sys.exit(1)
+
+    # create info-hash from info field of the torrent
+    try:
         info_dict = torrent_info[b'info']
+
         info_bencoded = bencodepy.encode(info_dict)
+        info_hash = hashlib.sha1(info_bencoded).digest()       
+    except Exception as E:
+        print(f"Error : {E}")
+        sys.exit(1)
 
-        info_hash = hashlib.sha1(info_bencoded).digest()
+    # calculate the total length of the files in torrent
+    try:
+        total_length = 0
 
+        if b'files' in info_dict:
+            files_list = info_dict[b'files']
+
+            for file in files_list:
+                total_length += file[b'length']
+        else:
+            total_length += info_dict[b'length']
+    
     except Exception as E:
         print(f"Error : {E}")
         sys.exit(1)
@@ -208,7 +230,7 @@ def get_peers_list(torrent_info)->List[Tuple[str, int]]:
             sys.exit(1)
 
         try:
-            peers = _make_announce_request(connection_id, info_hash, tracker_ip, tracker_port,1)
+            peer_list.put(_make_announce_request(connection_id, info_hash, total_length, tracker_ip, tracker_port,1))
         except TimeoutError:
             continue
         except InvalidAnnounceRespone as inv:
@@ -217,10 +239,5 @@ def get_peers_list(torrent_info)->List[Tuple[str, int]]:
         except Exception as e:
             print(f"Error: {e}")
             sys.exit(1)
-
-    if len(peers)==0:
-        print("Cannot find the list of peers! Something went wrong!")
-
-    return peers
 
 __all__ = ["get_peers_list"]
