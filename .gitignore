@@ -3,3 +3,4 @@ references.txt
 playarea.py
 utils/__pycache__/
 TorrentVenv/
+utils/flowofEvents.txt

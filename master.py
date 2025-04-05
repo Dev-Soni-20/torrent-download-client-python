@@ -1,27 +1,33 @@
 import bencodepy
 import sys
 from utils.get_peers import *
-# from utils.download import *
+from utils.download import *
 import threading
 import queue
 
-peers_list = queue.Queue()
+populated_peers_list = queue.Queue()
 
 def populate_peers():
-    get_peers_list(torrent_info,peers_list)
+    print("Populating Peers")
+    try:
+        get_peers_list(torrent_info,populated_peers_list)
+        print(f"Populated Peers, Queue Size: {populated_peers_list.qsize()}")
+    except Exception as e:
+        print(f"Error in populating peers: {e}")
 
 def connect_to_peers():
     #Logic for set 4 Onwards, goes here
-
     #Step 4.1 setting up TCP connects to the peers
+    print("Waiting for peers to be populated...")    
+    try:
+        print(f"===============Length of the peer_list: {populated_peers_list.qsize()} ==========================")
+        set_tcp_connections(populated_peers_list)
+    except Exception as e:
+        print(f"Error in setting TCP connection to peers: {e}")
     
-    pass
-    # while True:
-    #     peers = peers_list.get()
-    #     print(peers)
 
 
-if __name__=="__main__":
+if(__name__=="__main__"):
 
     if len(sys.argv) != 2:
         print("Usage: python script.py <torrent_file>")
@@ -53,4 +59,3 @@ if __name__=="__main__":
 
     tracker_thread.join()
     connector_thread.join()
-
