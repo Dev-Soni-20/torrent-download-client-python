@@ -6,41 +6,15 @@ from math import ceil
 import queue
 from typing import List, Tuple
 
+import utils.details as details
+from utils.json_data import ResumeData
+
 PORT_NUMBER = 6881
 TIMEOUT = 10
 peer_id = b'-TR4003-' + bytes(random.getrandbits(8) for _ in range(12))
-total_peices = None
-
-def get_peice_length(torrent_info:dict)->int:
-    try:
-        len = torrent_info[b'info'][b'piece length']      
-    except Exception as E:
-        print(f"Error : {E}")
-        sys.exit(1)
-
-    return len
-
-def get_total_length(torrent_info:dict)->int:
-    try:
-        total_length = 0
-        info_dict=torrent_info[b'info']
-
-        if b'files' in info_dict:
-            files_list = info_dict[b'files']
-
-            for file in files_list:
-                total_length += file[b'length']
-        else:
-            total_length += info_dict[b'length']
-    
-    except Exception as E:
-        print(f"Error : {E}")
-        sys.exit(1)
-
-    return total_length
-
-def get_total_peices(total_length: int, peice_length: int)->int:
-    return ceil(total_length/peice_length)
+piece_length = details.piece_length
+total_length = details.total_length
+total_peices = details.num_of_pieces
 
 def recvall(sock: socket.socket, n: int)->bytes:
     data = b''
@@ -69,7 +43,7 @@ def bitTorrent_handshake(sock: socket.socket, info_hash: bytes)->None:
     if len_resp!=len_req or msg_resp!=msg_req or info_hash_resp!=info_hash:
         raise ValueError("Invalid handshake")
     
-def expect_bitfeild(sock: socket.socket)->None:
+def expect_bitfeild(sock: socket.socket)->list:
     packet_len_bytes = recvall(sock, 4)
     packet_len = struct.unpack(">I", packet_len_bytes)[0]
 
@@ -87,10 +61,17 @@ def expect_bitfeild(sock: socket.socket)->None:
             bit = (byte >> (7 - i)) & 1
             bitfield.append(bool(bit))
 
-    # Step 6: Trim to exact number of pieces
     bitfield = bitfield[:total_peices]
     
     return bitfield
+
+def send_bitfeild(sock: socket.socket, resume_data: ResumeData)->None:
+    bitfield_data = resume_data.bitfield_to_bytes
+    bitfeild_msg = struct.pack(">Ib", 1 + len(bitfield_data), 5) + bitfield_data
+    sock.sendall(bitfeild_msg)
+
+def receive_pieces(sock: socket.socket)->None:
+    pass
 
 
 def connect_to_peer(ip: str, port: int, info_hash: bytes)->None:
@@ -111,16 +92,7 @@ def connect_to_peer(ip: str, port: int, info_hash: bytes)->None:
         print(f"Error: {e}")
         sys.exit(1)
 
-    
-
-
-
 def create_connection_to_peers(torrent_info: dict, info_hash:bytes, peers_list: List[Tuple[str,int]])->None:
-    global total_peices
-    peice_length = get_peice_length(torrent_info)
-    total_length = get_total_length(torrent_info)
-    total_peices = get_total_peices(total_length,peice_length)
-
     for (ip,port) in peers_list:
         connect_to_peer(ip, port, info_hash)
 
