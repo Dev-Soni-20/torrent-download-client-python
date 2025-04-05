@@ -4,11 +4,9 @@ import random
 import sys
 from urllib.parse import urlparse
 from typing import List, Tuple
-import bencodepy
-import hashlib
 import queue
 
-PORT_NUMBER = 6882
+PORT_NUMBER = 6881
 MAX_TRY = 1
 MAX_TIME_TO_WAIT = 1
 
@@ -163,7 +161,7 @@ def _make_announce_request(connection_id: int, info_hash: bytes, total_length: i
     return peers
     
 
-def get_peers_list(torrent_info: dict, peer_list: queue.Queue):
+def get_peers_list(torrent_info: dict, info_hash: bytes, peer_list: queue.Queue)->None:
     tracker_url_list = []
 
     # Extracting all the trackers from the torrent file
@@ -182,19 +180,10 @@ def get_peers_list(torrent_info: dict, peer_list: queue.Queue):
         print(f"Error : {E}")
         sys.exit(1)
 
-    # create info-hash from info field of the torrent
-    try:
-        info_dict = torrent_info[b'info']
-
-        info_bencoded = bencodepy.encode(info_dict)
-        info_hash = hashlib.sha1(info_bencoded).digest()       
-    except Exception as E:
-        print(f"Error : {E}")
-        sys.exit(1)
-
     # calculate the total length of the files in torrent
     try:
         total_length = 0
+        info_dict = torrent_info[b'info']
 
         if b'files' in info_dict:
             files_list = info_dict[b'files']
