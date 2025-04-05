@@ -1,6 +1,7 @@
 import bencodepy
 import sys
 from utils.get_peers import *
+# from utils.download import *
 import threading
 import queue
 
@@ -10,9 +11,14 @@ def populate_peers():
     get_peers_list(torrent_info,peers_list)
 
 def connect_to_peers():
-    while True:
-        peers = peers_list.get()
-        print(peers)
+    #Logic for set 4 Onwards, goes here
+
+    #Step 4.1 setting up TCP connects to the peers
+    
+    pass
+    # while True:
+    #     peers = peers_list.get()
+    #     print(peers)
 
 
 if __name__=="__main__":
