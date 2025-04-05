@@ -1,10 +1,17 @@
 import bencodepy
 import sys
-from utils.get_peers import *
-from utils.download import *
 import threading
 import queue
 import hashlib
+import os
+import time
+
+from utils.get_peers import *
+from utils.download import *
+from utils.json_data import ResumeData
+import utils.details as details
+
+RESUME_FILENAME = "resume.json"
 
 peers_list = queue.Queue()
 
@@ -24,11 +31,12 @@ def connect_to_peers(torrent_info, info_hash):
 
 if __name__=="__main__":
 
-    if len(sys.argv) != 2:
-        print("Usage: python script.py <torrent_file>")
+    if len(sys.argv) != 3:
+        print("Usage: python3 master.py <path_to_torrent_file> <path_to_download>")
         sys.exit(1)
 
     file_name=sys.argv[1]
+    save_loc=sys.argv[2]
 
     try:
         with open(file_name,"rb") as torrent_file:
@@ -55,12 +63,50 @@ if __name__=="__main__":
         print(f"Error : {E}")
         sys.exit(1)
 
-    tracker_thread = threading.Thread(target=populate_peers,args=(torrent_info, info_hash))
-    connector_thread = threading.Thread(target=connect_to_peers)
+    details.populate_details(info_dict)
 
-    tracker_thread.start()
-    connector_thread.start()
+    try:
+        name = info_dict[b'name'].decode('utf-8')
 
-    tracker_thread.join()
-    connector_thread.join()
+        if b'files' in info_dict:
+            dir_path=os.path.join(save_loc, name)
+        else:
+            root, ext = os.path.splitext(name)
+            print(root, ext)
+            dir_path=os.path.join(save_loc, root)
+
+        os.makedirs(dir_path, exist_ok=True)
+        json_file_path=os.path.join(dir_path, RESUME_FILENAME)
+
+        if RESUME_FILENAME in os.listdir(dir_path):
+            resume_data = ResumeData.from_json(json_file_path)
+        else:
+            resume_data = ResumeData(
+                info_hash= info_hash.hex(),
+                bitfield= [False for _ in range(details.num_of_pieces)],
+                piece_length= details.piece_length,
+                total_pieces= details.num_of_pieces,
+                downloaded= 0,
+                file_sizes= details.file_sizes,
+                mtime= int(time.time()),
+                verified_pieces= [],
+                last_active= time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            )
+    except Exception as E:
+        print(f"Error : {E}")
+        sys.exit(1)
+
+    try:
+        tracker_thread = threading.Thread(target=populate_peers,args=(torrent_info, info_hash))
+        connector_thread = threading.Thread(target=connect_to_peers)
+
+        tracker_thread.start()
+        connector_thread.start()
+
+        tracker_thread.join()
+        connector_thread.join()
+    except KeyboardInterrupt:
+        print("Exiting. Saving resume data.")
+        resume_data.to_json(json_file_path)
+        sys.exit(0)
 
