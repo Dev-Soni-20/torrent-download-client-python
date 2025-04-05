@@ -37,6 +37,8 @@ def _make_connection_request(tracker_ip: str, tracker_port: int, count:int)->int
         else:
             print(f"Trying to connect to {tracker_ip}:{tracker_port} again!\n")
             return _make_connection_request(tracker_ip,tracker_port,count+1)
+    except socket.gaierror:
+        raise socket.gaierror
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
@@ -108,6 +110,8 @@ def _make_announce_request(connection_id: int, info_hash: bytes, tracker_ip: str
         else:
             print(f"Trying to connect to {tracker_ip}:{tracker_port} again!\n")
             return _make_announce_request(connection_id, info_hash)
+    except socket.gaierror:
+        raise socket.gaierror
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
@@ -131,10 +135,10 @@ def _make_announce_request(connection_id: int, info_hash: bytes, tracker_ip: str
 
     print(f"Announce Response Length: {len(announce_resp)}")
 
-    action_resp, transaction_id_resp = struct.unpack(">LL", announce_resp)
-    # if action == 3:
-    print(action, transaction_id)
-    print(action_resp,transaction_id_resp)
+    # action_resp, transaction_id_resp = struct.unpack(">LL", announce_resp)
+    # # if action == 3:
+    # print(action, transaction_id)
+    # print(action_resp,transaction_id_resp)
 
 
     if len(announce_resp)<20:
@@ -190,7 +194,11 @@ def get_peers_list(torrent_info)->List[Tuple[str, int]]:
 
         try:
             connection_id =_make_connection_request(tracker_ip,tracker_port,1)
+        except socket.gaierror:
+            print("DNS lookup failed, trying next one!\n")
+            continue
         except TimeoutError:
+            print("Seems like this tracker is not working, trying next one!\n")
             continue
         except InvalidAnnounceRespone as inv:
             print(inv, "Trying next tracker!")
