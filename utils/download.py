@@ -95,8 +95,6 @@ def connect_to_peer(ip: str, port: int, info_hash: bytes)->None:
         sys.exit(1)
 
     #Sending and Receiving the bit-field message:
-    
-    
 
 def create_connection_to_peers(torrent_info: dict, info_hash:bytes, peers_list: List[Tuple[str,int]])->None:
     for (ip,port) in peers_list:
