@@ -1,0 +1,7 @@
+1.TCP Connection - From all the ip:port given by the tracker
+---->Once the TCP connection is set up
+2.BitTorrent Handshake - After the TCP connection is set up, a packet is made in which the peers tell each other that they are live
+---->
+3.Bit Field message - send and expected - GOOD PRACTICE
+---->Peers get to know what pieces they haave
+4.

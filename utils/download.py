@@ -78,12 +78,14 @@ def connect_to_peer(ip: str, port: int, info_hash: bytes)->None:
     sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     sock.timeout(TIMEOUT)
 
+    #TCP Connection
     try:
         sock.connect((ip,port))
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
+    #BitTorrent Handshake
     try:
         bitTorrent_handshake(sock, info_hash)
     except socket.timeout:
@@ -91,6 +93,10 @@ def connect_to_peer(ip: str, port: int, info_hash: bytes)->None:
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+    #Sending and Receiving the bit-field message:
+    
+    
 
 def create_connection_to_peers(torrent_info: dict, info_hash:bytes, peers_list: List[Tuple[str,int]])->None:
     for (ip,port) in peers_list:
