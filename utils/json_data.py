@@ -5,13 +5,12 @@ import json
 @dataclass
 class ResumeData:
     info_hash: str
-    bitfield: List[bool]
     piece_length: int
     total_pieces: int
     downloaded: int
     file_sizes: List[int]
     mtime: int
-    verified_pieces: List[int]
+    verified_pieces: List[bool]
     last_active: str
 
     def to_json(self, path: str) -> None:
@@ -24,17 +23,17 @@ class ResumeData:
             data = json.load(f)
         return cls(**data)
     
-    def bitfield_to_bytes(bitfield: list[bool]) -> bytes:
+    def verified_to_bytes(self) -> bytes:
         buf = bytearray()
         byte = 0
 
-        for i, bit in enumerate(bitfield):
+        for i, bit in enumerate(self.verified_pieces):
             byte = (byte << 1) | int(bit)
             if i % 8 == 7:
                 buf.append(byte)
                 byte = 0
 
-        remaining = len(bitfield) % 8
+        remaining = len(self.verified_pieces) % 8
         
         if remaining != 0:
             byte <<= (8 - remaining)

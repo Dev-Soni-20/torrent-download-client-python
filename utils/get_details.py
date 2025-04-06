@@ -1,5 +1,6 @@
 import sys
 from math import ceil
+from typing import List
 
 def get_piece_length(info_dict:dict)->int:
     try:
@@ -48,5 +49,14 @@ def get_file_sizes(info_dict: dict)->list:
 
     return file_sizes
 
+def get_hash_list(info_dict: dict, num_of_pieces: int)->List[bytes]:
+    hashes = list()
 
-__all__=["get_piece_length", "get_total_length", "get_total_pieces", "get_file_sizes"]
+    pieces = info_dict[b'pieces']
+    
+    for i in range(num_of_pieces):
+        hashes.append(pieces[20*i:20*(i+1)])
+    
+    return hashes
+
+__all__=["get_piece_length", "get_total_length", "get_total_pieces", "get_file_sizes", "get_hash_list"]
