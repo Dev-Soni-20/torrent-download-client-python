@@ -18,7 +18,7 @@ peers_list = queue.Queue()
 def populate_peers(torrent_info, info_hash):
     get_peers_list(torrent_info, info_hash, peers_list)
 
-def connect_to_peers(torrent_info, info_hash):
+def connect_to_peers(torrent_info, info_hash, resume_data):
 
     #Logic for set 4 Onwards, goes here
 
@@ -26,7 +26,7 @@ def connect_to_peers(torrent_info, info_hash):
     
     while True:
         peers = peers_list.get()
-        create_connection_to_peers(torrent_info, info_hash, peers)
+        create_connection_to_peers(torrent_info, info_hash, peers, resume_data)
 
 
 if __name__=="__main__":
@@ -97,7 +97,7 @@ if __name__=="__main__":
 
     try:
         tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash))
-        connector_thread = threading.Thread(target=connect_to_peers, args=(torrent_info, info_hash))
+        connector_thread = threading.Thread(target=connect_to_peers, args=(torrent_info, info_hash, resume_data))
 
         tracker_thread.start()
         connector_thread.start()

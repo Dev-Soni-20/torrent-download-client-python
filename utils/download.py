@@ -4,12 +4,13 @@ import random
 import sys
 from typing import List, Tuple
 import hashlib
-
+import time
 import utils.details as details
 from utils.json_data import ResumeData
 
 PORT_NUMBER = 6881
-BLOCK_SIZE = min(2**14, details.piece_length)
+BLOCK_SIZE = 2**14
+# min(2**14, details.piece_length)
 TIMEOUT = 10
 peer_id = b'-TR4003-' + bytes(random.getrandbits(8) for _ in range(12))
 
@@ -77,7 +78,7 @@ def request_piece_transfer(sock: socket.socket, piece_ind: int)->None:
         sock.sendall(payload)
 
         piece_len_resp = recvall(sock,4)
-        len = struct.unpack(">I")
+        len = struct.unpack(">I", piece_len_resp)[0]
 
         piece_resp = recvall(sock,len)
         msg_id_resp, piece_ind_resp, offset_resp = struct.unpack(">bII", piece_resp[:9])
@@ -92,57 +93,95 @@ def request_piece_transfer(sock: socket.socket, piece_ind: int)->None:
 
     return buffer
 
-def receive_pieces(sock: socket.socket, bitfeild: List[bool], pieces_state: List[bool])->None:
+def wait_for_unchoke(sock: socket.socket, timeout: int=30) -> bool:
+    sock.settimeout(TIMEOUT)
+    start = time.time()
+
+    while(time.time()-start < timeout):
+        try:
+            permission_packet = recvall(sock,5)
+            length, msg_id = struct.unpack(">Ib", permission_packet)
+
+            if(length!=1):
+                raise ValueError("Unexpected length for choke/unchoke")
+
+            if msg_id == 1:
+                #peer has unchoked us
+                sock.settimeout(None)
+                return True
+            elif msg_id == 0:
+                #peer has choked us
+                continue
+
+        except socket.timeout:
+            continue
+        except Exception as e:
+            print(f"Error while waiting for unchoke: {e}")
+            break
+    
+    #Timed out waiting for the unchoke
+    return False
+            
+
+
+def receive_pieces(sock: socket.socket, bitfeild: List[bool], pieces_state: List[int])->None:
     # first, send interested or not interested message
     
     flag = False
     for i in range(details.num_of_pieces):
-        if bitfeild[i]==True and pieces_state==0:
+        if bitfeild[i]==True and pieces_state[i]==0:
             flag=True
             break
 
     if flag:
-        not_interested_packet = struct.pack(">Ib", 1, 2)
-        sock.sendall(not_interested_packet)
+        interested_packet = struct.pack(">Ib", 1, 2)
+        sock.sendall(interested_packet)
     else:
         not_interested_packet = struct.pack(">Ib", 1, 3)
         sock.sendall(not_interested_packet)
         return
-    
+    #=======================================================================
     # At this point, peer has some pieces that we are interested in
     # Receive choke or unchoke message
 
-    permission_packet = recvall(sock, 5)
-    length, permission = struct.unpack(">Ib", permission_packet)
+    # permission_packet = recvall(sock, 5)
+    # length, permission = struct.unpack(">Ib", permission_packet)
 
-    if length!=1:
-        raise ValueError("Unexpected length for choke/unchoke")
+    # if length!=1:
+    #     raise ValueError("Unexpected length for choke/unchoke")
     
-    if permission==1:
-        #received unchoke
-        sock.settimeout(None)
+    # if permission==1:
+    #     #received unchoke
+    #     sock.settimeout(None)
 
-        while permission != 0:
-            next_packet = recvall(sock,5)
-            length, permission = struct.unpack(">Ib", next_packet)
-            if length!=1:
-                raise ValueError("Unexpected length for choke/unchoke")
+    #     while permission != 0:
+    #         next_packet = recvall(sock,5)
+    #         length, permission = struct.unpack(">Ib", next_packet)
+    #         if length!=1:
+    #             raise ValueError("Unexpected length for choke/unchoke")
             
-        sock.settimeout(TIMEOUT)
+    #     sock.settimeout(TIMEOUT)
 
     # At this point, we have received choke message from the peer.
+    #========================================================================
+    unchoked  = wait_for_unchoke(sock)
+    
+    if not unchoked:
+        return
+    
 
     for i in range(details.num_of_pieces):
         if bitfeild[i]==True and pieces_state[i]==0:
             # We should download this packet from peer
-            pieces_state[i]=1
+            try:
+                piece_data = request_piece_transfer(sock, i)
+                pieces_state[i]=2
+            except Exception as e:
+                print(f"Error in downloading piece {i}: {e}")
+                pieces_state[i]=0
+            
 
-            request_piece_transfer(sock)
-
-
-
-
-def connect_to_peer(ip: str, port: int, info_hash: bytes)->None:
+def connect_to_peer(ip: str, port: int, info_hash: bytes, resume_data: ResumeData)->None:
     sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     sock.timeout(TIMEOUT)
 
@@ -162,7 +201,23 @@ def connect_to_peer(ip: str, port: int, info_hash: bytes)->None:
         print(f"Error: {e}")
         sys.exit(1)
 
-    #Sending and Receiving the bit-field message:
+    #Receiving the bit-field message:
+    try:
+        peer_bitfield = expect_bitfeild(sock)
+    except Exception as e:
+        print(f"Error Receiving bitfield from peer({ip}:{port}): {e}")
+        sys.exit(1)
+    
+    #Sending the bit field message:
+    try:
+        send_bitfeild(sock, resume_data)
+    except Exception as e:
+        print(f"Error in sending the bitfield to peer({ip}:{port}): {e}")
+        sys.exit(1)
+    
+    return sock, peer_bitfield
+    
+
 
 def create_connection_to_peers(torrent_info: dict, info_hash:bytes, peers_list: List[Tuple[str,int]], resume_data: ResumeData)->None:
     # 0: not started, 1: began exchange with some thread, 2: successfully downloaded
@@ -173,7 +228,8 @@ def create_connection_to_peers(torrent_info: dict, info_hash:bytes, peers_list: 
             pieces_state[i]=2
     
     for (ip,port) in peers_list:
-        connect_to_peer(ip, port, info_hash)
+        sock, peer_bitfield = connect_to_peer(ip, port, info_hash)
+        receive_pieces(sock, peer_bitfield, pieces_state)
 
 
 

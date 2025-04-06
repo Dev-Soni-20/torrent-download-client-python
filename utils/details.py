@@ -17,4 +17,4 @@ def populate_details(info_dict: dict)->None:
     total_length = get_total_length(info_dict)
     num_of_pieces = get_total_pieces(total_length,piece_length)
     file_sizes = get_file_sizes(info_dict)
-    hash_of_pieces = get_hash_list(info_dict)
+    hash_of_pieces = get_hash_list(info_dict,num_of_pieces)
