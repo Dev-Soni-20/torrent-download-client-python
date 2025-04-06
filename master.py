@@ -83,13 +83,12 @@ if __name__=="__main__":
         else:
             resume_data = ResumeData(
                 info_hash= info_hash.hex(),
-                bitfield= [False for _ in range(details.num_of_pieces)],
                 piece_length= details.piece_length,
                 total_pieces= details.num_of_pieces,
                 downloaded= 0,
                 file_sizes= details.file_sizes,
                 mtime= int(time.time()),
-                verified_pieces= [],
+                verified_pieces= [False for _ in range(details.num_of_pieces)],
                 last_active= time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             )
     except Exception as E:
@@ -97,8 +96,8 @@ if __name__=="__main__":
         sys.exit(1)
 
     try:
-        tracker_thread = threading.Thread(target=populate_peers,args=(torrent_info, info_hash))
-        connector_thread = threading.Thread(target=connect_to_peers)
+        tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash))
+        connector_thread = threading.Thread(target=connect_to_peers, args=(torrent_info, info_hash))
 
         tracker_thread.start()
         connector_thread.start()
