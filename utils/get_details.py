@@ -1,6 +1,8 @@
 import sys
 from math import ceil
 from typing import List
+import bencodepy
+import hashlib
 
 def get_piece_length(info_dict:dict)->int:
     try:
@@ -59,4 +61,10 @@ def get_hash_list(info_dict: dict, num_of_pieces: int)->List[bytes]:
     
     return hashes
 
-__all__=["get_piece_length", "get_total_length", "get_total_pieces", "get_file_sizes", "get_hash_list"]
+def get_info_hash(info_dict: dict)->bytes:
+    info_bencoded = bencodepy.encode(info_dict)
+    info_hash = hashlib.sha1(info_bencoded).digest()
+
+    return info_hash
+
+__all__=["get_piece_length", "get_total_length", "get_total_pieces", "get_file_sizes", "get_hash_list", "get_info_hash"]

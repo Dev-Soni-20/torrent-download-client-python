@@ -27,14 +27,14 @@ def _make_connection_request(tracker_ip: str, tracker_port: int, count:int)->int
     connection_req=struct.pack(">QLL", protocol_id, action, transaction_id)
 
     try:
-        print(f"Trying to connect to {tracker_ip}:{tracker_port}")
+        # print(f"Trying to connect to {tracker_ip}:{tracker_port}")
         sock.sendto(connection_req,(tracker_ip,tracker_port))
     except socket.timeout:
         if count==MAX_TRY:
-            print(f"Cannot connect to {tracker_ip}:{tracker_port}, tring next tracker\n")
+            # print(f"Cannot connect to {tracker_ip}:{tracker_port}, tring next tracker\n")
             raise TimeoutError("Timeout Reached!")
         else:
-            print(f"Trying to connect to {tracker_ip}:{tracker_port} again!\n")
+            # print(f"Trying to connect to {tracker_ip}:{tracker_port} again!\n")
             return _make_connection_request(tracker_ip,tracker_port,count+1)
     except socket.gaierror:
         raise socket.gaierror
@@ -42,23 +42,23 @@ def _make_connection_request(tracker_ip: str, tracker_port: int, count:int)->int
         print(f"Error: {e}")
         sys.exit(1)
 
-    print("The connection request has been sent")
+    # print("The connection request has been sent")
 
     try:
         connection_resp, addr = sock.recvfrom(2048)
     except socket.timeout:
         if count==MAX_TRY:
-            print(f"Did not recieve response from {tracker_ip}:{tracker_port}, tring next tracker\n")
+            # print(f"Did not recieve response from {tracker_ip}:{tracker_port}, tring next tracker\n")
             raise TimeoutError("Timeout Reached!")
         else:
-            print(f"Did not recieve respose, trying to connect to {tracker_ip}:{tracker_port} again!\n")
+            # print(f"Did not recieve respose, trying to connect to {tracker_ip}:{tracker_port} again!\n")
             return _make_connection_request(tracker_ip,tracker_port,count+1)
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
     
     
-    print("The connection respone has been received")
+    # print("The connection respone has been received")
 
 
     if len(connection_resp)<16:
@@ -97,17 +97,17 @@ def _make_announce_request(connection_id: int, info_hash: bytes, total_length: i
     sock.settimeout(MAX_TIME_TO_WAIT)
     
 
-    print(f"Announce Request Length: {len(announce_req)}")
+    # print(f"Announce Request Length: {len(announce_req)}")
 
     try:
-        print(f"Sending an announce request to {tracker_ip}:{tracker_port}")
+        # print(f"Sending an announce request to {tracker_ip}:{tracker_port}")
         sock.sendto(announce_req, (tracker_ip, tracker_port))
     except socket.timeout:
         if count==MAX_TRY:
-            print(f"Cannot connect to {tracker_ip}:{tracker_port}, tring next tracker\n")
+            # print(f"Cannot connect to {tracker_ip}:{tracker_port}, tring next tracker\n")
             raise TimeoutError("Timeout Reached!")
         else:
-            print(f"Trying to connect to {tracker_ip}:{tracker_port} again!\n")
+            # print(f"Trying to connect to {tracker_ip}:{tracker_port} again!\n")
             return _make_announce_request(connection_id, info_hash)
     except socket.gaierror:
         raise socket.gaierror
@@ -115,24 +115,24 @@ def _make_announce_request(connection_id: int, info_hash: bytes, total_length: i
         print(f"Error: {e}")
         sys.exit(1)
 
-    print("The announce request has been sent")
+    # print("The announce request has been sent")
     
     try:
         announce_resp, addr = sock.recvfrom(4096)
     except socket.timeout:
         if count==MAX_TRY:
-            print(f"Did not recieve response from {tracker_ip}:{tracker_port}, tring next tracker\n")
+            # print(f"Did not recieve response from {tracker_ip}:{tracker_port}, tring next tracker\n")
             raise TimeoutError("Timeout Reached!")
         else:
-            print(f"Did not recieve respose, trying to connect to {tracker_ip}:{tracker_port} again!\n")
+            # print(f"Did not recieve respose, trying to connect to {tracker_ip}:{tracker_port} again!\n")
             return _make_connection_request(tracker_ip,tracker_port,count+1)
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
-    print("The announce respone has been received")
+    # print("The announce respone has been received")
 
-    print(f"Announce Response Length: {len(announce_resp)}\n")
+    # print(f"Announce Response Length: {len(announce_resp)}\n")
 
     if len(announce_resp)<20:
         raise InvalidAnnounceRespone("Invalid announce respone from tracker: Packet of less than 20 bytes is received!\n")

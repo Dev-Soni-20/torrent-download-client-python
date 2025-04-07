@@ -1,20 +1,16 @@
 from utils.get_details import *
 
-piece_length = None
-total_length = None
-num_of_pieces = None
-file_sizes = None
-hash_of_pieces = None
+class TorrentDetails:
+    def __init__(self, info_dict: dict):
+        self.piece_length = get_piece_length(info_dict)
+        self.total_length = get_total_length(info_dict)
+        self.num_of_pieces = get_total_pieces(self.total_length, self.piece_length)
+        self.file_sizes = get_file_sizes(info_dict)
+        self.hash_of_pieces = get_hash_list(info_dict, self.num_of_pieces)
+        self.info_hash = get_info_hash(info_dict)
 
-def populate_details(info_dict: dict)->None:
-    global piece_length
-    global total_length
-    global num_of_pieces
-    global file_sizes
-    global hash_of_pieces
-
-    piece_length = get_piece_length(info_dict)
-    total_length = get_total_length(info_dict)
-    num_of_pieces = get_total_pieces(total_length,piece_length)
-    file_sizes = get_file_sizes(info_dict)
-    hash_of_pieces = get_hash_list(info_dict,num_of_pieces)
+class ParsedMessage:
+    def __init__(self, size, id, payload):
+        self.size = size
+        self.id = id
+        self.payload = payload

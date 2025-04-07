@@ -9,16 +9,16 @@ import time
 from utils.get_peers import *
 from utils.download import *
 from utils.json_data import ResumeData
-import utils.details as details
+from utils.details import TorrentDetails
 
 RESUME_FILENAME = "resume.json"
 
 peers_list = queue.Queue()
 
-def populate_peers(torrent_info, info_hash):
+def populate_peers(torrent_info: dict, info_hash: bytes):
     get_peers_list(torrent_info, info_hash, peers_list)
 
-def connect_to_peers(torrent_info, info_hash, resume_data):
+def connect_to_peers(details: TorrentDetails, resume_data: ResumeData):
 
     #Logic for set 4 Onwards, goes here
 
@@ -26,7 +26,7 @@ def connect_to_peers(torrent_info, info_hash, resume_data):
     
     while True:
         peers = peers_list.get()
-        create_connection_to_peers(torrent_info, info_hash, peers, resume_data)
+        create_connection_to_peers(details, peers, resume_data)
 
 
 if __name__=="__main__":
@@ -63,7 +63,7 @@ if __name__=="__main__":
         print(f"Error : {E}")
         sys.exit(1)
 
-    details.populate_details(info_dict)
+    details = TorrentDetails(info_dict)
 
     try:
         name = info_dict[b'name'].decode('utf-8')
@@ -82,7 +82,7 @@ if __name__=="__main__":
             resume_data = ResumeData.from_json(json_file_path)
         else:
             resume_data = ResumeData(
-                info_hash= info_hash.hex(),
+                info_hash = details.info_hash.hex(),
                 piece_length= details.piece_length,
                 total_pieces= details.num_of_pieces,
                 downloaded= 0,
@@ -96,6 +96,7 @@ if __name__=="__main__":
         sys.exit(1)
 
     try:
+        print(info_hash)
         tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash))
         connector_thread = threading.Thread(target=connect_to_peers, args=(torrent_info, info_hash, resume_data))
 
