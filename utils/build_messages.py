@@ -1,7 +1,10 @@
 import struct
-import utils.details as details
 import random
+import socket
+import asyncio
+import utils.details as details
 from utils.details import TorrentDetails, ParsedMessage
+import utils.handlers as handler
 
 def build_bitTorrent_handshake(details: TorrentDetails):
     pstrlen = 19
@@ -85,7 +88,31 @@ def build_port(port: int):
     port_resp = struct.pack(">IbH", 3, 9, port)
     return port_resp
 
-def parse_message(packet: bytes):
+def recvall(sock: socket.socket, n: int)->bytes:
+    data = b''
+
+    while(len(data)<n):
+        part = sock.recv(n-len(data))
+        if not part:
+            raise ConnectionError("Peer closed connection")
+        data+=part
+
+    return data
+
+async def recv_whole_message(reader: asyncio.StreamReader, isHandshake: bool) -> bytes:
+    if isHandshake:
+        # Handshake messages are fixed size (68 bytes)
+        message = await reader.readexactly(68)
+    else:
+        # Read the 4-byte length prefix
+        len_bytes = await reader.readexactly(4)
+        length = struct.unpack(">I", len_bytes)[0]
+        # Now read the payload of the specified length
+        payload = await reader.readexactly(length)
+        message = len_bytes + payload
+    return message
+
+def parse_message(packet: bytes)->ParsedMessage:
     length = None if len(packet) < 4 else struct.unpack(">I", packet[:4])[0]
     id = None if len(packet) < 5 else struct.unpack(">b", packet[4:5])[0]
     payload = None if len(packet) < 6 else packet[5:]
@@ -93,4 +120,22 @@ def parse_message(packet: bytes):
     parsed_msg = ParsedMessage(length, id, payload)
 
     return parsed_msg
+
+def message_handler(packet: bytes):
+    parsed_message = parse_message(packet)
+
+    if parse_message.id==0:
+        handler.chock_handler()
+
+    elif parse_message.id==1:
+        handler.unchock_handler()
+
+    elif parse_message.id==4:
+        handler.have_handler()
+
+    elif parse_message.id==5:
+        handler.bitfeild_handler()
+        
+    elif parse_message.id==7:
+        handler.piece_handler()
 
