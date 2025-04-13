@@ -1,59 +1,16 @@
 import socket
+import asyncio 
+import os
 import utils.build_messages as messages
 import utils.verify_messages as verify
 from utils.details import *
-import asyncio 
-import os
+from utils.json_data import ResumeData
 
-TIMEOUT=10
-NUM_CONN_TASKS = 10
-NUM_HANDLE_TASKS = 5
+TIMEOUT=3
+NUM_CONN_TASKS = 4
+NUM_HANDLE_TASKS = 2
 NUM_DOWNLOAD_TASKS = 2
 BLOCK_SIZE = 2**14
-
-def download(peer: Peer, details: TorrentDetails):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(TIMEOUT)
-
-    try:
-        print(f"Trying TCP connection to {peer}\n")
-        sock.connect((peer.ip,peer.port))
-    except Exception as e:
-        print(f"Cannot make TCP connection with {peer}, Error: {e}\n")
-        return None
-    
-    # TCP connection has been set up, now try bittorrent handshake
-
-    try:
-        print(f"Trying BitTorrent handshake with {peer}\n")
-        handshake_req = messages.build_bitTorrent_handshake(details)
-
-        sock.sendall(handshake_req)
-
-        handshake_resp = messages.recv_whole_message(sock, True)
-
-        if verify.is_handshake(handshake_resp):
-            print(f"BitTorrent handshake is successful with {peer}\n")
-    except Exception as e:
-        print(f"Cannot make BitTorrent handshake with {peer}, Error: {e}\n")
-        return None
-
-    # BitTorrent Handshake is completed successfully.
-
-    try:
-        print(f"Trying to get Bitfeild message from {peer}\n")
-        bitfeild_resp = messages.recv_whole_message(sock, False)
-    except Exception as e:
-        print(f"Did not received bitfeild message from {peer}, Error: {e}")
-        print("Continuing...")
-
-    try:
-        sock.sendall(messages.build_interested())
-    except Exception as e:
-        print(f"Cannot make BitTorrent handshake with {peer}, Error: {e}\n")
-        return None
-    
-############################ Trying Code from GPT ###################################
 
 async def connection_worker(peer_queue: asyncio.Queue, handshake_queue: asyncio.Queue, torrent_details: TorrentDetails):
     """
@@ -65,7 +22,7 @@ async def connection_worker(peer_queue: asyncio.Queue, handshake_queue: asyncio.
     """
     while True:
         try:
-            peer = peer_queue.get_nowait()
+            peer = await peer_queue.get()
         except asyncio.QueueEmpty:
             break
 
@@ -74,7 +31,7 @@ async def connection_worker(peer_queue: asyncio.Queue, handshake_queue: asyncio.
             # asyncio.open_connection returns (reader, writer)
             reader, writer = await asyncio.wait_for(asyncio.open_connection(peer.ip, peer.port), timeout=TIMEOUT)
         except Exception as e:
-            print(f"Cannot make TCP connection with {peer}, Error: {e}")
+            print(f"Cannot make TCP connection with {peer}, Error: {type(e).__name__}: {e}")
             peer_queue.task_done()
             continue
 
@@ -86,8 +43,8 @@ async def connection_worker(peer_queue: asyncio.Queue, handshake_queue: asyncio.
 
             # For handshake response, we assume your messages.recv_whole_message can be awaited,
             # or you could wrap it via run_in_executor if it is blocking.
-            handshake_resp = await asyncio.wait_for(messages.recv_whole_message(reader, expect_handshake=True), timeout=TIMEOUT)
-            if verify.is_handshake(handshake_resp):
+            handshake_resp = await asyncio.wait_for(messages.recv_whole_message(reader, isHandshake=True), timeout=TIMEOUT)
+            if verify.is_handshake(handshake_resp, torrent_details.info_hash):
                 print(f"BitTorrent handshake successful with {peer}")
             else:
                 print(f"Invalid handshake response from {peer}")
@@ -107,22 +64,16 @@ async def connection_worker(peer_queue: asyncio.Queue, handshake_queue: asyncio.
         peer_queue.task_done()
 
 async def handle_worker(handshake_queue: asyncio.Queue, download_queue: asyncio.Queue):
-    """
-    Asynchronous handler worker:
-      - Retrieves a tuple (peer, reader, writer).
-      - Listens for an expected message from the peer.
-      - Optionally sends an "interested" message.
-      - Enqueues for download stage.
-    """
     while True:
         try:
-            peer, reader, writer = await asyncio.wait_for(handshake_queue.get(), timeout=TIMEOUT)
+            peer, reader, writer = await handshake_queue.get()
         except asyncio.TimeoutError:
             break  # No new peers in a while, exit
 
         try:
             # Wait for a bitfield or have message from the peer.
-            msg = await asyncio.wait_for(messages.recv_whole_message(reader, expect_handshake=False), timeout=TIMEOUT)
+            msg = await asyncio.wait_for(messages.recv_whole_message(reader, isHandshake=False), timeout=TIMEOUT)
+            parsed_message = messages.parse_message(msg)
 
             #################################################################################################
             """
@@ -132,17 +83,28 @@ async def handle_worker(handshake_queue: asyncio.Queue, download_queue: asyncio.
             #################################################################################################
 
 
-            if verify.is_have(msg) or verify.is_bitfield(msg):
-                print(f"Received expected message from {peer}")
-                # Optionally, send an "interested" message:
+            if verify.is_have(parsed_message):
+                print(f"Received have message from {peer}")
+
                 try:
                     writer.write(messages.build_interested())
                     await writer.drain()
                 except Exception as e:
                     print(f"Failed sending 'interested' to {peer}, Error: {e}")
+            
+            elif verify.is_bitfeild(parsed_message):
+                print(f"Received bitfeild message from {peer}")
+        
+                try:
+                    writer.write(messages.build_interested())
+                    await writer.drain()
+                except Exception as e:
+                    print(f"Failed sending 'interested' to {peer}, Error: {e}")
+            
             else:
                 print(f"Received unexpected message from {peer}")
             await download_queue.put((peer, reader, writer))
+            
         except Exception as e:
             print(f"Error handling message from {peer}, Error: {e}")
             writer.close()
@@ -157,7 +119,7 @@ async def download_worker(download_queue: asyncio.Queue, torrent_details: Torren
     """
     while True:
         try:
-            peer, reader, writer = await asyncio.wait_for(download_queue.get(), timeout=TIMEOUT)
+            peer, reader, writer = await download_queue.get()
         except asyncio.TimeoutError:
             break  # Exit if no new items to download
 
@@ -270,7 +232,7 @@ def save_piece_to_disk(piece_index: int, piece_data: bytes, torrent_details: Tor
                 f.seek(file_write_offset)
                 f.write(data_to_write)
     
-async def main(peers: list, details: TorrentDetails):
+async def main(peers: list, details: TorrentDetails, resume_data: ResumeData):
     # Create async queues for pipeline stages
     peer_queue = asyncio.Queue()
     handshake_queue = asyncio.Queue()
@@ -278,7 +240,7 @@ async def main(peers: list, details: TorrentDetails):
 
     # Populate the peer_queue
     for peer in peers:
-        await peer_queue.put(peer)
+        await peer_queue.put(Peer(peer[0],peer[1]))
 
     # Launch connection tasks.
     conn_tasks = [asyncio.create_task(connection_worker(peer_queue, handshake_queue, details))

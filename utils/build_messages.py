@@ -8,12 +8,14 @@ import utils.handlers as handler
 
 def build_bitTorrent_handshake(details: TorrentDetails):
     pstrlen = 19
-    pstr = "BitTorrent protocol"
+    pstr = b"BitTorrent protocol"
 
     peer_id = b'-TR4003-' + bytes(random.getrandbits(8) for _ in range(12))
+
     
     handshake_req = struct.pack(">B19s8x20s20s", pstrlen, pstr, details.info_hash, peer_id)
 
+    print(handshake_req,end="\n\n")
     return handshake_req
 
 def build_keep_alive():

@@ -5,8 +5,10 @@ import queue
 import hashlib
 import os
 import time
+import asyncio
 
 from utils.get_peers import *
+from utils.dwnld import *
 from utils.download import *
 from utils.json_data import ResumeData
 from utils.details import TorrentDetails
@@ -19,14 +21,14 @@ def populate_peers(torrent_info: dict, info_hash: bytes):
     get_peers_list(torrent_info, info_hash, peers_list)
 
 def connect_to_peers(details: TorrentDetails, resume_data: ResumeData):
-
     #Logic for set 4 Onwards, goes here
 
     #Step 4.1 setting up TCP connects to the peers
     
     while True:
         peers = peers_list.get()
-        create_connection_to_peers(details, peers, resume_data)
+        asyncio.run(main(peers, details, resume_data))
+        # create_connection_to_peers(details,peers, resume_data)
 
 
 if __name__=="__main__":
@@ -98,7 +100,7 @@ if __name__=="__main__":
     try:
         print(info_hash)
         tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash))
-        connector_thread = threading.Thread(target=connect_to_peers, args=(torrent_info, info_hash, resume_data))
+        connector_thread = threading.Thread(target=connect_to_peers, args=(details, resume_data))
 
         tracker_thread.start()
         connector_thread.start()
@@ -109,4 +111,3 @@ if __name__=="__main__":
         print("Exiting. Saving resume data.")
         resume_data.to_json(json_file_path)
         sys.exit(0)
-

@@ -13,7 +13,7 @@ import utils.build_messages
 PORT_NUMBER = 6881
 BLOCK_SIZE = 2**14
 # min(2**14, details.piece_length)
-TIMEOUT = 10
+TIMEOUT = 3
 peer_id = b'-TR4003-' + bytes(random.getrandbits(8) for _ in range(12))
 
 def recvall(sock: socket.socket, n: int)->bytes:
