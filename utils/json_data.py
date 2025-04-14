@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict, field
-from typing import List
+from typing import List, Set
 import json
 from asyncio import Lock
 
@@ -14,14 +14,17 @@ class ResumeData:
     verified_pieces: List[bool]
     last_active: str
 
+    # These fields are excluded from serialization
+    lock: Lock = field(init=False, repr=False, compare=False)
+    claimed_pieces: Set[int] = field(default_factory=set, init=False, repr=False, compare=False)
+
     def __post_init__(self):
         self.lock = Lock()
 
-    lock: Lock = field(init=False, repr=False, compare=False)
-
     def to_json(self, path: str) -> None:
         data = asdict(self)
-        data.pop('lock', None)  # Remove the non-serializable Lock
+        data.pop('lock', None)
+        data.pop('claimed_pieces', None)  # 🧼 Clean out before writing
         with open(path, "w") as f:
             json.dump(data, f, indent=1)
 
@@ -29,8 +32,12 @@ class ResumeData:
     def from_json(cls, path: str) -> "ResumeData":
         with open(path, "r") as f:
             data = json.load(f)
-        return cls(**data)
-    
+        obj = cls(**data)
+        # Initialize the transient fields
+        obj.lock = Lock()
+        obj.claimed_pieces = set()
+        return obj
+
     def verified_to_bytes(self) -> bytes:
         buf = bytearray()
         byte = 0
@@ -42,9 +49,9 @@ class ResumeData:
                 byte = 0
 
         remaining = len(self.verified_pieces) % 8
-        
+
         if remaining != 0:
             byte <<= (8 - remaining)
             buf.append(byte)
-        
+
         return bytes(buf)

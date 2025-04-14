@@ -8,7 +8,6 @@ import time
 import asyncio
 
 from utils.get_peers import *
-from utils.dwnld import *
 from utils.download import *
 from utils.json_data import ResumeData
 from utils.details import TorrentDetails
@@ -17,18 +16,33 @@ RESUME_FILENAME = "resume.json"
 
 peers_list = queue.Queue()
 
+def tracker_loop(torrent_info: dict, info_hash: bytes):
+    while True:
+        populate_peers(torrent_info, info_hash)
+        print("[Tracker] Sleeping for 10 minutes before next announce.")
+        time.sleep(600) 
+
 def populate_peers(torrent_info: dict, info_hash: bytes):
     get_peers_list(torrent_info, info_hash, peers_list)
 
 def connect_to_peers(details: TorrentDetails, resume_data: ResumeData):
-    #Logic for set 4 Onwards, goes here
-
-    #Step 4.1 setting up TCP connects to the peers
-    
     while True:
         peers = peers_list.get()
         asyncio.run(main(peers, details, resume_data))
         # create_connection_to_peers(details,peers, resume_data)
+    # while True:
+    #     try:
+    #         peers = []
+    #         while not peers_list.empty():
+    #             peers.append(peers_list.get())
+
+    #         if peers:
+    #             asyncio.run(main(peers, details, resume_data))
+
+    #         time.sleep(30)  # Wait a bit before checking again
+    #     except Exception as e:
+    #         print(f"Error in peer connector: {e}")
+    #         time.sleep(10)
 
 
 if __name__=="__main__":

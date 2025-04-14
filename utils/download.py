@@ -1,258 +1,424 @@
+import asyncio 
+import os
+from typing import List
 import struct
-import socket
-import random
-import sys
-from typing import List, Tuple
-import hashlib
-import time
 
+import utils.build_messages as messages
+import utils.verify_messages as verify
+from utils.details import *
 from utils.json_data import ResumeData
-from utils.details import TorrentDetails
-import utils.build_messages
+import utils.handlers as handler
 
-PORT_NUMBER = 6881
+TIMEOUT=5
+NUM_CONN_TASKS = 4 #4 threads for tcp conn and handshake
+NUM_HANDLE_TASKS = 2 #for have pieces messages, bit field messages
+NUM_DOWNLOAD_TASKS = 4 #num threads actually downloading content
 BLOCK_SIZE = 2**14
-# min(2**14, details.piece_length)
-TIMEOUT = 3
-peer_id = b'-TR4003-' + bytes(random.getrandbits(8) for _ in range(12))
+MAX_CLAIM_PER_PEER = 30
 
-def recvall(sock: socket.socket, n: int)->bytes:
-    data = b''
-
-    while(len(data)<n):
-        part = sock.recv(n-len(data))
-
-        if not part:
-            raise ConnectionError("Peer closed connection")
-    
-        data+=part
-
-    return data
-
-def bitTorrent_handshake(sock: socket.socket, info_hash: bytes)->None:
-    msg_req = b'BitTorrent protocol'
-    len_req = 19
-
-    handshake_req = struct.pack(">B19s8x20s20s", len_req, msg_req, info_hash, peer_id)
-    sock.sendall(handshake_req)
-
-    handshake_resp = recvall(sock,68)
-
-    len_resp, msg_resp, info_hash_resp, peer_id_resp = struct.unpack(">B19s8x20s20s", handshake_resp)
-
-    if len_resp!=len_req or msg_resp!=msg_req or info_hash_resp!=info_hash:
-        raise ValueError("Invalid handshake")
-    
-def expect_bitfeild(sock: socket.socket, details: TorrentDetails)->List[bool]:
-    try:
-        packet_len_bytes = recvall(sock, 4)
-    except Exception as e:
-        raise e
-
-    packet_len = struct.unpack(">I", packet_len_bytes)[0]
-
-    if packet_len==None:
-        print("Was not able to receive the bitfeild message!!\n")
-        return None
-
-    bitfeild_content = recvall(sock, packet_len)
-
-    msg_id = bitfeild_content[0]
-    if msg_id != 5:
-        raise ValueError(f"Expected bitfield message (5), got {msg_id}")
-
-    bitfield = []
-    bitfield_bytes = bitfeild_content[1:]
-
-    for byte in bitfield_bytes:
-        for i in range(8):
-            bit = (byte >> (7 - i)) & 1
-            bitfield.append(bool(bit))
-
-    bitfield = bitfield[:details.num_of_pieces]
-    
-    return bitfield
-
-def send_bitfeild(sock: socket.socket, resume_data: ResumeData, details: TorrentDetails)->None:
-    bitfield_data = resume_data.verified_to_bytes()
-    bitfeild_msg = struct.pack(">Ib", 1 + len(bitfield_data), 5) + bitfield_data
-    sock.sendall(bitfeild_msg)
-
-def request_piece_transfer(sock: socket.socket, piece_ind: int, details: TorrentDetails)->None:    
-    buffer = bytearray(details.piece_length)
-    offset = 0
-
-    while offset < details.piece_length:
-        block_len = min(BLOCK_SIZE, details.piece_length - offset)
-        payload = struct.pack(">IbIII", 13, 6, piece_ind, offset, block_len)
-        sock.sendall(payload)
-
-        piece_len_resp = recvall(sock,4)
-        len = struct.unpack(">I", piece_len_resp)[0]
-
-        piece_resp = recvall(sock,len)
-        msg_id_resp, piece_ind_resp, offset_resp = struct.unpack(">bII", piece_resp[:9])
-        block = piece_resp[9:]
-
-        buffer[offset_resp : offset_resp+len(block)] = block
-        offset += len(block)
-
-    sha1 = hashlib.sha1(buffer).digest()
-    if sha1 != details.hash_of_pieces[piece_ind]:
-        raise ValueError("Piece hash does not match! Download corrupted.")
-
-    return buffer
-
-def wait_for_unchoke(sock: socket.socket, timeout: int=30) -> bool:
-    sock.settimeout(TIMEOUT)
-    start = time.time()
-
-    while(time.time()-start < timeout):
+async def connection_worker(peer_queue: asyncio.Queue, handshake_queue: asyncio.Queue, torrent_details: TorrentDetails):
+    while True:
         try:
-            permission_packet = recvall(sock,5)
-            length, msg_id = struct.unpack(">Ib", permission_packet)
+            peer = await peer_queue.get()
+        except asyncio.QueueEmpty:
+            break
 
-            if(length!=1):
-                raise ValueError("Unexpected length for choke/unchoke")
+        try:
+            print(f"Trying TCP connection to {peer}")
+            # asyncio.open_connection returns (reader, writer)
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(peer.ip, peer.port), timeout=TIMEOUT)
+        except Exception as e:
+            print(f"Cannot make TCP connection with {peer}, Error: {type(e).__name__}: {e}")
+            peer_queue.task_done()
+            continue
 
-            if msg_id == 1:
-                #peer has unchoked us
-                sock.settimeout(None)
-                return True
-            elif msg_id == 0:
-                #peer has choked us
+        try:
+            print(f"Trying BitTorrent handshake with {peer}")
+            handshake_req = messages.build_bitTorrent_handshake(torrent_details)
+            writer.write(handshake_req)
+            await writer.drain()
+
+            # For handshake response, we assume your messages.recv_whole_message can be awaited,
+            # or you could wrap it via run_in_executor if it is blocking.
+            handshake_resp = await asyncio.wait_for(messages.recv_whole_message(reader, isHandshake=True), timeout=TIMEOUT)
+            if verify.is_handshake(handshake_resp, torrent_details.info_hash):
+                print(f"BitTorrent handshake successful with {peer}")
+            else:
+                print(f"Invalid handshake response from {peer}")
+                writer.close()
+                await writer.wait_closed()
+                peer_queue.task_done()
                 continue
-
-        except socket.timeout:
-            continue
         except Exception as e:
-            print(f"Error while waiting for unchoke: {e}")
-            break
-    
-    #Timed out waiting for the unchoke
-    return False
-            
-
-
-def receive_pieces(sock: socket.socket, bitfeild: List[bool], pieces_state: List[int], details: TorrentDetails)->None:
-    # first, send interested or not interested message
-    
-    flag = False
-    for i in range(details.num_of_pieces):
-        if bitfeild[i]==True and pieces_state[i]==0:
-            flag=True
-            break
-
-    if flag:
-        interested_packet = struct.pack(">Ib", 1, 2)
-        sock.sendall(interested_packet)
-    else:
-        not_interested_packet = struct.pack(">Ib", 1, 3)
-        sock.sendall(not_interested_packet)
-        return
-    #=======================================================================
-    # At this point, peer has some pieces that we are interested in
-    # Receive choke or unchoke message
-
-    # permission_packet = recvall(sock, 5)
-    # length, permission = struct.unpack(">Ib", permission_packet)
-
-    # if length!=1:
-    #     raise ValueError("Unexpected length for choke/unchoke")
-    
-    # if permission==1:
-    #     #received unchoke
-    #     sock.settimeout(None)
-
-    #     while permission != 0:
-    #         next_packet = recvall(sock,5)
-    #         length, permission = struct.unpack(">Ib", next_packet)
-    #         if length!=1:
-    #             raise ValueError("Unexpected length for choke/unchoke")
-            
-    #     sock.settimeout(TIMEOUT)
-
-    # At this point, we have received choke message from the peer.
-    #========================================================================
-    unchoked  = wait_for_unchoke(sock)
-    
-    if not unchoked:
-        return
-    
-
-    for i in range(details.num_of_pieces):
-        if bitfeild[i]==True and pieces_state[i]==0:
-            # We should download this packet from peer
-            try:
-                piece_data = request_piece_transfer(sock, i)
-                pieces_state[i]=2
-            except Exception as e:
-                print(f"Error in downloading piece {i}: {e}")
-                pieces_state[i]=0
-            
-
-def connect_to_peer(sock: socket.socket, ip: str, port: int, info_hash: bytes, resume_data: ResumeData):
-    #BitTorrent Handshake
-    print(f"Trying BitTorrent handshake with peer {ip}:{port}")
-    try:
-        bitTorrent_handshake(sock, info_hash)
-    except Exception as e:
-        print(f"Error: {e}")
-        raise e
-
-    print(f"BitTorrent handshake completed successfully with peer {ip}:{port}")
-
-    #Receiving the bit-field message:
-    print(f"Waiting for bitfield message from {ip}:{port}")
-    try:
-        peer_bitfield = expect_bitfeild(sock)
-    except Exception as e:
-        print(f"Error Receiving bitfield from peer {ip}:{port}. Error: {e}")
-        raise e
-    print(f"Bitfeild message has been received successfully from peer {ip}:{port}")
-
-    #Sending the bit field message:
-    # try:
-    #     send_bitfeild(sock, resume_data)
-    # except Exception as e:
-    #     print(f"Error in sending the bitfield to peer({ip}:{port}): {e}")
-    #     sys.exit(1)
-    
-    return sock, peer_bitfield
-    
-
-
-def create_connection_to_peers(details: TorrentDetails, peers_list: List[Tuple[str,int]], resume_data: ResumeData)->None:
-    # 0: not started, 1: began exchange with some thread, 2: successfully downloaded
-    pieces_state = [0 for _ in range(details.num_of_pieces)]
-
-    for i in range(details.num_of_pieces):
-        if resume_data.verified_pieces[i] is True:
-            pieces_state[i]=2
-    
-    for (ip,port) in peers_list:
-
-        try:
-            sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-            sock.settimeout(TIMEOUT)
-
-            #TCP Connection
-            print(f"Trying to connect to peer {ip}:{port}\n")
-            sock.connect((ip,port))
-        except Exception as e:
-            print(f"TCP connection failed with peer {ip}:{port}! Reason: {e}")
-            print(f"Cannot make connection to the peer {ip}:{port}, trying next one\n")
+            print(f"Handshake failed with {peer}, Error: {e}")
+            writer.close()
+            await writer.wait_closed()
+            peer_queue.task_done()
             continue
 
-        print(f"TCP connection with peer {ip}:{port} has been set up\n")
+        # Enqueue the successful connection for the next stage.
+        await handshake_queue.put((peer, reader, writer))
+        peer_queue.task_done()
+
+
+async def wait_for_unchoke(reader: asyncio.StreamReader, peer: Peer) -> bool:
+    while True:
+        try:
+            msg = await asyncio.wait_for(messages.recv_whole_message(reader, isHandshake=False), timeout=TIMEOUT)
+        except asyncio.TimeoutError:
+            print(f"Timeout while waiting for choke/unchoke from {peer}.")
+            return False
+
+        parsed = messages.parse_message(msg)
+
+        if verify.is_unchoke(parsed):
+            print(f"{peer} unchoked us. Proceeding to download.")
+            return True
+        elif verify.is_choke(parsed):
+            print(f"{peer} is choked, waiting for unchoke...")
+        else:
+            print(f"Received irrelevant message from {peer} while waiting for unchoke.")
+
+
+async def handle_worker(handshake_queue: asyncio.Queue, download_queue: asyncio.Queue, resume_data: ResumeData):
+    while True:
+        try:
+            peer, reader, writer = await handshake_queue.get()
+        except asyncio.TimeoutError:
+            break  # No new peers in a while, exit
 
         try:
-            sock, peer_bitfield = connect_to_peer(sock, ip, port, details.info_hash, resume_data)
+            # Wait for a bitfield or have message from the peer.
+            msg = await asyncio.wait_for(messages.recv_whole_message(reader, isHandshake=False), timeout=TIMEOUT)
+            parsed_message = messages.parse_message(msg)
+
+            if verify.is_have(parsed_message):
+                print(f"Received have message from {peer}")
+
+                try:
+                    pieces_to_request = handler.have_handler(parsed_message, resume_data.verified_pieces)
+
+                    if len(pieces_to_request)==0:
+                        print(f"No pieces needed from {peer}")
+                        handshake_queue.task_done()
+                        continue
+
+                    unchoked = await wait_for_unchoke(reader, peer, TIMEOUT)
+                    if unchoked:
+                        await download_queue.put((peer, reader, writer, pieces_to_request))
+                    else:
+                        print(f"Did not receive unchoke from {peer}. Closing connection.")
+                        writer.close()
+                        await writer.wait_closed()
+
+                    # Put this peer again for listening further have messages
+                    # await handshake_queue.put((peer, reader, writer))
+
+                except Exception as e:
+                    print(f"Failed handling 'have' from {peer}, Error: {e}")
+            
+            elif verify.is_bitfeild(parsed_message):
+                print(f"Received bitfeild message from {peer}")
+        
+                try:
+                    pieces_to_request = handler.bitfield_handler(parsed_message, resume_data.verified_pieces)
+
+                    if len(pieces_to_request)==0:
+                        print(f"No pieces needed from {peer}")
+                        handshake_queue.task_done()
+                        continue
+
+                    writer.write(messages.build_interested())
+                    await writer.drain()
+
+                    await download_queue.put((peer, reader, writer, pieces_to_request))
+
+                    # Put this peer again for listening further have messages
+                    # await handshake_queue.put((peer, reader, writer))
+
+                except Exception as e:
+                    print(f"Failed sending 'interested' to {peer} in respone of bitfeild, Error: {e}")  
+            else:
+                print(f"Received unexpected message from {peer}")
+
         except Exception as e:
-            print(f"bitfeild connection failed with peer {ip}:{port}! Reason: {e}")
-            print(f"Cannot make connection to the peer {ip}:{port}, trying next one\n")
-            continue    
-        # receive_pieces(sock, peer_bitfield, pieces_state)
+            print(f"Error handling message from {peer}, Error: {e}")
+            writer.close()
+            await writer.wait_closed()
+        
+        handshake_queue.task_done()
+
+async def download_worker(download_queue: asyncio.Queue, torrent_details: TorrentDetails, resume_data: ResumeData):
+    """
+    Asynchronous download worker:
+      - Retrieves a tuple (peer, reader, writer).
+      - Initiates piece download.
+    """
+    while True:
+        try:
+            peer, reader, writer, pieces_to_request = await download_queue.get()
+        except asyncio.TimeoutError:
+            break  # Exit if no new items to download
+
+        try:
+            # claimed = []
+            # async with resume_data.lock:
+            #     for piece_index in pieces_to_request:
+            #         if len(claimed) >= MAX_CLAIM_PER_PEER:
+            #             break
+            #         if not resume_data.verified_pieces[piece_index] and piece_index not in resume_data.claimed_pieces:
+            #             resume_data.claimed_pieces.add(piece_index)
+            #             claimed.append(piece_index)
+
+            # if not claimed:
+            #     writer.close()
+            #     await writer.wait_closed()
+            #     download_queue.task_done()
+            #     continue
+            
+            print(f"Starting download from {peer}")
+            await download_from_peer(peer, reader, writer, pieces_to_request, torrent_details, resume_data)
+        
+        except Exception as e:
+            print(f"Error downloading from {peer}, Error: {e}")
+        download_queue.task_done()
 
 
-__all__ = ["create_connection_to_peers"]
+# async def download_from_peer(peer: Peer, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, claimed:List[int], torrent_details: TorrentDetails, resume_data: ResumeData):
+#     try:
+#         print(f"[{peer.ip}:{peer.port}] Starting download")
+
+#         total_pieces = torrent_details.num_of_pieces
+#         piece_length = torrent_details.piece_length
+
+#         print(claimed,end="\n\n\n")
+
+#         for piece_index in claimed:
+            
+#             num_blocks = (piece_length + BLOCK_SIZE - 1) // BLOCK_SIZE
+#             piece_data = bytearray(piece_length)
+
+#             for block_num in range(num_blocks):
+#                 begin = block_num * BLOCK_SIZE
+#                 block_length = min(BLOCK_SIZE, piece_length - begin)
+
+#                 # Send request for the block
+#                 request_msg = messages.build_request(piece_index, begin, block_length)
+#                 writer.write(request_msg)
+#                 await writer.drain()
+
+#                 # Await the full response
+#                 while True:
+#                     try:
+#                         msg = await messages.recv_whole_message(reader, isHandshake=False)
+#                         parsed_message = messages.parse_message(msg)
+
+#                         if verify.is_piece(parsed_message):
+#                             r_index, r_begin = struct.unpack(">II", parsed_message.payload[:8])
+#                             r_block = parsed_message.payload[8:]
+
+#                             if r_index == piece_index and r_begin == begin:
+#                                 piece_data[begin:begin+len(r_block)] = r_block
+#                                 break  # Valid block received
+#                     except asyncio.IncompleteReadError:
+#                         print(f"[{peer.ip}] Incomplete read. Closing connection.")
+#                         return
+#                     except Exception as e:
+#                         print(f"[{peer.ip}] Error receiving piece: {e}")
+#                         return
+
+#             print(f"[{peer.ip}] Completed piece {piece_index + 1}/{total_pieces}")
+
+
+#             # verify hash here, or store it
+#             if not handler.verify_piece_hash(piece_data, torrent_details.hash_of_pieces[piece_index]):
+#                 print(f"[{peer.ip}] Invalid hash for piece {piece_index}, discarding.")
+#                 async with resume_data.lock:
+#                     resume_data.claimed_pieces.discard(piece_index)
+#                 continue
+
+#             print(f"Piece Index {piece_index} downloaded successfully from {peer}.")
+
+#             async with resume_data.lock:
+#                 if not resume_data.verified_pieces[piece_index]:  # Avoid redundant save
+#                     resume_data.verified_pieces[piece_index] = True
+#                     resume_data.downloaded += 1
+#                 resume_data.claimed_pieces.discard(piece_index)
+            
+#             # TODO: save piece_data to disk or buffer
+#             save_piece_to_disk(piece_index, piece_data, torrent_details)
+
+#     except Exception as e:
+#         print(f"[{peer.ip}] Download failed, Error: {e}")
+#         async with resume_data.lock:
+#             for idx in claimed:
+#                 resume_data.claimed_pieces.discard(idx)
+
+async def download_from_peer(peer: Peer, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, pieces_available_from_peer:List[int], torrent_details: TorrentDetails, resume_data: ResumeData):
+    piece_length = torrent_details.piece_length
+    total_pieces = torrent_details.num_of_pieces
+
+    try:
+        print(f"[{peer.ip}:{peer.port}] Starting download")
+        while True:
+            #1. Claim a new batch
+            print(f"[{peer.ip}:{peer.port}] Claiming a batch to download")
+            claimed = []
+            async with resume_data.lock:
+                for piece_index in pieces_available_from_peer:
+                    if len(claimed) >= MAX_CLAIM_PER_PEER:
+                        break
+                    if not resume_data.verified_pieces[piece_index] and piece_index not in resume_data.claimed_pieces:
+                        resume_data.claimed_pieces.add(piece_index)
+                        claimed.append(piece_index)
+
+            if not claimed:
+                print(f"[{peer.ip}] No more claimable pieces. Closing connection.")
+                break  # 🎉 All pieces are claimed/verified — we’re done
+
+            print(f"[{peer.ip}:{peer.port}] Batch Claimed-> {claimed}")
+
+            for piece_index in claimed:
+                num_blocks = (piece_length + BLOCK_SIZE - 1) // BLOCK_SIZE
+                piece_data = bytearray(piece_length)
+
+                for block_num in range(num_blocks):
+                    begin = block_num * BLOCK_SIZE
+                    block_length = min(BLOCK_SIZE, piece_length - begin)
+
+                    request_msg = messages.build_request(piece_index, begin, block_length)
+                    writer.write(request_msg)
+                    await writer.drain()
+
+                    while True:
+                        try:
+                            msg = await messages.recv_whole_message(reader, isHandshake=False)
+                            parsed = messages.parse_message(msg)
+
+                            if verify.is_piece(parsed):
+                                r_index, r_begin = struct.unpack(">II", parsed.payload[:8])
+                                r_block = parsed.payload[8:]
+
+                                if r_index == piece_index and r_begin == begin:
+                                    piece_data[begin:begin+len(r_block)] = r_block
+                                    break
+                        except asyncio.IncompleteReadError:
+                            print(f"[{peer.ip}] Incomplete read.")
+                            raise
+                        except Exception as e:
+                            print(f"[{peer.ip}] Error: {e}")
+                            raise
+
+                # ✅ Hash verification
+                if not handler.verify_piece_hash(piece_data, torrent_details.hash_of_pieces[piece_index]):
+                    print(f"[{peer.ip}] Invalid hash for piece {piece_index}")
+                    async with resume_data.lock:
+                        resume_data.claimed_pieces.discard(piece_index)
+                    continue
+
+                print(f"[{peer.ip}] Piece {piece_index} downloaded successfully.")
+
+                save_piece_to_disk(piece_index, piece_data, torrent_details)
+
+                async with resume_data.lock:
+                    resume_data.verified_pieces[piece_index] = True
+                    resume_data.downloaded += 1
+                    resume_data.claimed_pieces.discard(piece_index)
+
+    except Exception as e:
+        print(f"[{peer.ip}] Peer download error: {e}")
+        # On total failure, unclaim all current batch
+        async with resume_data.lock:
+            for piece_index in claimed:
+                resume_data.claimed_pieces.discard(piece_index)
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+def save_piece_to_disk(piece_index: int, piece_data: bytes, torrent_details: TorrentDetails):
+    """
+    Save the fully downloaded piece to disk.
+    
+    This function handles multi-file torrents. It maps the piece's global offset into one
+    or more files based on file boundaries.
+    
+    Assumes:
+      - torrent_details.piece_length: standard piece length
+      - torrent_details.files: a list of dictionaries, each containing:
+          'path'   : File path (str)
+          'length' : Length of the file (int)
+          'offset' : Starting offset of the file in the torrent's byte stream (int)
+    """
+    # Global offset within the entire torrent data for this piece.
+    global_offset = piece_index * torrent_details.piece_length
+    piece_size = len(piece_data)
+    piece_end = global_offset + piece_size
+
+    # Iterate over each file to see if the piece overlaps.
+    for file_entry in torrent_details.files:
+        file_path = file_entry['path']
+        file_offset = file_entry['offset']
+        file_length = file_entry['length']
+        file_end = file_offset + file_length
+
+        # Check if there is an intersection between [global_offset, piece_end)
+        # and [file_offset, file_end)
+        overlap_start = max(global_offset, file_offset)
+        overlap_end = min(piece_end, file_end)
+
+        if overlap_start < overlap_end:
+            # There is an overlapping region.
+            # Calculate the corresponding part in the piece data.
+            piece_data_start = overlap_start - global_offset
+            piece_data_end = overlap_end - global_offset
+            data_to_write = piece_data[piece_data_start:piece_data_end]
+
+            # Determine the offset within the file where the data should go.
+            file_write_offset = overlap_start - file_offset
+
+            # Ensure the directory exists.
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            # Open the file in binary read/write mode.
+            # It is assumed the file is already created with the correct size.
+            # If not, you may want to create or truncate the file.
+
+            if not os.path.exists(file_path):
+                with open(file_path, 'wb') as f:
+                    f.truncate(file_length)
+
+            with open(file_path, 'r+b') as f:
+                f.seek(file_write_offset)
+                f.write(data_to_write)
+    
+async def main(peers: list, details: TorrentDetails, resume_data: ResumeData):
+    # Create async queues for pipeline stages
+    peer_queue = asyncio.Queue()
+    handshake_queue = asyncio.Queue()
+    download_queue = asyncio.Queue()
+
+    # Populate the peer_queue
+    for peer in peers:
+        await peer_queue.put(Peer(peer[0],peer[1]))
+
+    # Launch connection tasks.
+    conn_tasks = [asyncio.create_task(connection_worker(peer_queue, handshake_queue, details))
+                  for _ in range(NUM_CONN_TASKS)]
+    # Launch handling tasks.
+    handle_tasks = [asyncio.create_task(handle_worker(handshake_queue, download_queue, resume_data))
+                    for _ in range(NUM_HANDLE_TASKS)]
+    # Launch download tasks.
+    download_tasks = [asyncio.create_task(download_worker(download_queue, details, resume_data))
+                      for _ in range(NUM_DOWNLOAD_TASKS)]
+
+    # Wait until all peers have been processed by the connection stage.
+    await peer_queue.join()
+    # Wait until all handshake tasks have processed their peers.
+    await handshake_queue.join()
+    # Wait until downloads are complete.
+    await download_queue.join()
+
+    # Cancel remaining tasks if any
+    for task in conn_tasks + handle_tasks + download_tasks:
+        task.cancel()
+    print("All tasks completed.")
