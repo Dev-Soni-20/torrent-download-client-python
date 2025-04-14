@@ -11,38 +11,27 @@ from utils.get_peers import *
 from utils.download import *
 from utils.json_data import ResumeData
 from utils.details import TorrentDetails
+from utils.logger import Logger
+
 
 RESUME_FILENAME = "resume.json"
 
 peers_list = queue.Queue()
 
-def tracker_loop(torrent_info: dict, info_hash: bytes):
+logger = Logger()
+logger.display_stats_loop()
+
+def populate_peers(torrent_info: dict, info_hash: bytes, logger: Logger):
     while True:
-        populate_peers(torrent_info, info_hash)
-        print("[Tracker] Sleeping for 10 minutes before next announce.")
-        time.sleep(600) 
+        get_peers_list(torrent_info, info_hash, peers_list, logger)
+        [Interval, Seeder, Leecher] = get_interval_data()
+        print(f"Interval:{Interval}, Seeders:{Seeder}, Leechers:{Leecher}")
+        time.sleep(Interval+1)
 
-def populate_peers(torrent_info: dict, info_hash: bytes):
-    get_peers_list(torrent_info, info_hash, peers_list)
-
-def connect_to_peers(details: TorrentDetails, resume_data: ResumeData):
+def connect_to_peers(details: TorrentDetails, resume_data: ResumeData, logger: Logger):
     while True:
         peers = peers_list.get()
-        asyncio.run(main(peers, details, resume_data))
-        # create_connection_to_peers(details,peers, resume_data)
-    # while True:
-    #     try:
-    #         peers = []
-    #         while not peers_list.empty():
-    #             peers.append(peers_list.get())
-
-    #         if peers:
-    #             asyncio.run(main(peers, details, resume_data))
-
-    #         time.sleep(30)  # Wait a bit before checking again
-    #     except Exception as e:
-    #         print(f"Error in peer connector: {e}")
-    #         time.sleep(10)
+        asyncio.run(main(peers, details, resume_data, logger))
 
 
 if __name__=="__main__":
@@ -112,14 +101,15 @@ if __name__=="__main__":
         sys.exit(1)
 
     try:
-        tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash))
-        connector_thread = threading.Thread(target=connect_to_peers, args=(details, resume_data))
+        tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash, logger))
+        connector_thread = threading.Thread(target=connect_to_peers, args=(details, resume_data, logger))
 
         tracker_thread.start()
         connector_thread.start()
 
         tracker_thread.join()
         connector_thread.join()
+        
     except KeyboardInterrupt:
         print("Exiting. Saving resume data.")
         resume_data.to_json(json_file_path)

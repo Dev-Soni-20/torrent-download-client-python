@@ -24,7 +24,7 @@ class ResumeData:
     def to_json(self, path: str) -> None:
         data = asdict(self)
         data.pop('lock', None)
-        data.pop('claimed_pieces', None)  # 🧼 Clean out before writing
+        data.pop('claimed_pieces', None) 
         with open(path, "w") as f:
             json.dump(data, f, indent=1)
 
@@ -33,7 +33,6 @@ class ResumeData:
         with open(path, "r") as f:
             data = json.load(f)
         obj = cls(**data)
-        # Initialize the transient fields
         obj.lock = Lock()
         obj.claimed_pieces = set()
         return obj

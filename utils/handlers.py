@@ -3,12 +3,6 @@ from typing import List
 import struct
 import hashlib
 
-def chock_handler():
-    pass
-
-def unchock_handler():
-    pass
-
 def have_handler(parsed_message: ParsedMessage, verified_pieces: List[bool])->List[int]:
     piece_index, = struct.unpack(">I", parsed_message.payload)  # Big-endian unsigned int
     result = []
@@ -33,9 +27,6 @@ def bitfield_handler(parsed_message: ParsedMessage, verified_pieces: List[bool])
                 result.append(piece_index)
 
     return result
-
-def piece_handler():
-    pass
 
 def verify_piece_hash(piece_data: bytearray, piece_hash: bytes):
     calculated_hash = hashlib.sha1(piece_data).digest()
