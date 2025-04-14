@@ -100,6 +100,9 @@ if __name__=="__main__":
         print(f"Error : {type(E).__name__} {E}")
         sys.exit(1)
 
+    # print(info_dict)
+    # print(details.files)
+
     try:
         tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash, logger))
         connector_thread = threading.Thread(target=connect_to_peers, args=(details, resume_data, logger))

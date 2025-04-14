@@ -87,7 +87,7 @@ def get_file_details(info_dict: dict, root: str):
     else:
         file_length = info_dict.get(b'length', 0)
         files_list.append({
-            'path': root.join,
+            'path': root+info_dict.get(b'name','').decode('utf-8'),
             'length': file_length,
             'offset': 0,
         })

@@ -14,7 +14,7 @@ import utils.handlers as handler
 TIMEOUT=5 # Maximum Timeout for a particular ongoing connection
 NUM_CONN_TASKS = 4 # Number of threads alloted for handling TCP Connections and BitTorrent Handshake
 NUM_HANDLE_TASKS = 2 #Number of threads alloted for handling pieces messages, bit field messages, choke/unchoke messages
-NUM_DOWNLOAD_TASKS = 4 #Number of threads alloted for downloading the pieces (1 Thread/peer)
+NUM_DOWNLOAD_TASKS = 8 #Number of threads alloted for downloading the pieces (1 Thread/peer)
 MAX_CLAIM_PER_PEER = 30 #Maximum number of pieces a peer can claim to give/download from
 BLOCK_SIZE = 2**14
 
@@ -219,7 +219,6 @@ async def download_from_peer(peer: Peer, reader: asyncio.StreamReader, writer: a
                             raise
                         except Exception as e:
                             logger.error(f"[{peer.ip}] Error during block read: {e}")
-                            raise
 
                 # Hash verification
                 if not handler.verify_piece_hash(piece_data, torrent_details.hash_of_pieces[piece_index]):
