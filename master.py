@@ -65,18 +65,18 @@ if __name__=="__main__":
         print(f"Error : {E}")
         sys.exit(1)
 
-    details = TorrentDetails(info_dict)
+    name = info_dict[b'name'].decode('utf-8')
+    
+    if b'files' in info_dict:
+            dir_path=os.path.join(save_loc, name)
+    else:
+        root, ext = os.path.splitext(name)
+        dir_path=os.path.join(save_loc, root)
+
+    dir_path=dir_path+'/'
+    details = TorrentDetails(info_dict, dir_path)
 
     try:
-        name = info_dict[b'name'].decode('utf-8')
-
-        if b'files' in info_dict:
-            dir_path=os.path.join(save_loc, name)
-        else:
-            root, ext = os.path.splitext(name)
-            print(root, ext)
-            dir_path=os.path.join(save_loc, root)
-
         os.makedirs(dir_path, exist_ok=True)
         json_file_path=os.path.join(dir_path, RESUME_FILENAME)
 
@@ -94,11 +94,10 @@ if __name__=="__main__":
                 last_active= time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             )
     except Exception as E:
-        print(f"Error : {E}")
+        print(f"Error : {type(E).__name__} {E}")
         sys.exit(1)
 
     try:
-        print(info_hash)
         tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash))
         connector_thread = threading.Thread(target=connect_to_peers, args=(details, resume_data))
 

@@ -67,4 +67,31 @@ def get_info_hash(info_dict: dict)->bytes:
 
     return info_hash
 
-__all__=["get_piece_length", "get_total_length", "get_total_pieces", "get_file_sizes", "get_hash_list", "get_info_hash"]
+def get_file_details(info_dict: dict, root: str):
+    files_list = []
+
+    # If the torrent is in multifile mode
+    if b'files' in info_dict:
+        offset = 0
+        for file_info in info_dict[b'files']:
+            file_path_str = [s.decode('utf-8') for s in file_info[b'path']]
+            file_path = '/'.join(file_path_str)
+            file_length = file_info[b'length']
+            
+            files_list.append({
+                'path': root+file_path,
+                'length': file_length,
+                'offset': offset,
+            })
+            offset += file_length  # update offset for next file
+    else:
+        file_length = info_dict.get(b'length', 0)
+        files_list.append({
+            'path': root.join,
+            'length': file_length,
+            'offset': 0,
+        })
+
+    return files_list
+
+__all__=["get_piece_length", "get_total_length", "get_total_pieces", "get_file_sizes", "get_hash_list", "get_info_hash", "get_file_details"]

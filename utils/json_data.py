@@ -1,6 +1,7 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import List
 import json
+from asyncio import Lock
 
 @dataclass
 class ResumeData:
@@ -13,9 +14,16 @@ class ResumeData:
     verified_pieces: List[bool]
     last_active: str
 
+    def __post_init__(self):
+        self.lock = Lock()
+
+    lock: Lock = field(init=False, repr=False, compare=False)
+
     def to_json(self, path: str) -> None:
+        data = asdict(self)
+        data.pop('lock', None)  # Remove the non-serializable Lock
         with open(path, "w") as f:
-            json.dump(asdict(self), f, indent=2)
+            json.dump(data, f, indent=1)
 
     @classmethod
     def from_json(cls, path: str) -> "ResumeData":

@@ -17,3 +17,12 @@ def is_have(msg: ParsedMessage):
 
 def is_bitfeild(msg: ParsedMessage):
     return msg.id==5
+
+def is_choke(msg: ParsedMessage) -> bool:
+    return msg.id == 0 and msg.size == 1
+
+def is_unchoke(msg: ParsedMessage) -> bool:
+    return msg.id == 1 and msg.size == 1
+
+def is_piece(msg: ParsedMessage) -> bool:
+    return msg.id == 7 and msg.size > 9 and msg.payload is not None

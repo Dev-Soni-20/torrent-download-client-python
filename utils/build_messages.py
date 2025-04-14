@@ -122,22 +122,3 @@ def parse_message(packet: bytes)->ParsedMessage:
     parsed_msg = ParsedMessage(length, id, payload)
 
     return parsed_msg
-
-def message_handler(packet: bytes):
-    parsed_message = parse_message(packet)
-
-    if parse_message.id==0:
-        handler.chock_handler()
-
-    elif parse_message.id==1:
-        handler.unchock_handler()
-
-    elif parse_message.id==4:
-        handler.have_handler()
-
-    elif parse_message.id==5:
-        handler.bitfeild_handler()
-        
-    elif parse_message.id==7:
-        handler.piece_handler()
-
