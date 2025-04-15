@@ -33,9 +33,8 @@ def connect_to_peers(details: TorrentDetails, resume_data: ResumeData, logger: L
         peers = peers_list.get()
         asyncio.run(main(peers, details, resume_data, logger))
 
-
 if __name__=="__main__":
-
+  
     if len(sys.argv) != 3:
         print("Usage: python3 master.py <path_to_torrent_file> <path_to_download>")
         sys.exit(1)
