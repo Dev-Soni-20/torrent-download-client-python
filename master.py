@@ -70,7 +70,7 @@ if __name__=="__main__":
     name = info_dict[b'name'].decode('utf-8')
     
     if b'files' in info_dict:
-            dir_path=os.path.join(save_loc, name)
+        dir_path=os.path.join(save_loc, name)
     else:
         root, ext = os.path.splitext(name)
         dir_path=os.path.join(save_loc, root)
@@ -98,9 +98,6 @@ if __name__=="__main__":
     except Exception as E:
         print(f"Error : {type(E).__name__} {E}")
         sys.exit(1)
-
-    # print(info_dict)
-    # print(details.files)
 
     try:
         tracker_thread = threading.Thread(target=populate_peers, args=(torrent_info, info_hash, logger))
