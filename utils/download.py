@@ -213,12 +213,10 @@ async def download_from_peer(peer: Peer, reader: asyncio.StreamReader, writer: a
                                 if r_index == piece_index and r_begin == begin:
                                     piece_data[begin:begin + len(r_block)] = r_block
                                     break
-
-                        except asyncio.IncompleteReadError:
-                            logger.error(f"[{peer.ip}] Incomplete read during block {block_num}")
-                            raise
+                                
                         except Exception as e:
                             logger.error(f"[{peer.ip}] Error during block read: {e}")
+                            raise e
 
                 # Hash verification
                 if not handler.verify_piece_hash(piece_data, torrent_details.hash_of_pieces[piece_index]):
