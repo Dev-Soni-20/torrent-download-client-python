@@ -15,7 +15,7 @@ TIMEOUT=5 # Maximum Timeout for a particular ongoing connection
 NUM_CONN_TASKS = 4 # Number of threads alloted for handling TCP Connections and BitTorrent Handshake
 NUM_HANDLE_TASKS = 2 #Number of threads alloted for handling pieces messages, bit field messages, choke/unchoke messages
 NUM_DOWNLOAD_TASKS = 8 #Number of threads alloted for downloading the pieces (1 Thread/peer)
-MAX_CLAIM_PER_PEER = 1 #Maximum number of pieces a peer can claim to give/download from
+MAX_CLAIM_PER_PEER = 30 #Maximum number of pieces a peer can claim to give/download from
 BLOCK_SIZE = 2**14
 
 async def connection_worker(peer_queue: asyncio.Queue, handshake_queue: asyncio.Queue, torrent_details: TorrentDetails, logger: CONNECTION_LOGGER):
@@ -203,7 +203,7 @@ async def download_from_peer(peer: Peer, reader: asyncio.StreamReader, writer: a
 
                     while True:
                         try:
-                            msg = await messages.recv_whole_message(reader, isHandshake=False)
+                            msg = await asyncio.wait_for(messages.recv_whole_message(reader, isHandshake=False), timeout=20)
                             parsed = messages.parse_message(msg)
 
                             if verify.is_piece(parsed):
